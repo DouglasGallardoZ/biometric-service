@@ -5,10 +5,10 @@ from typing import List
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from starlette.concurrency import run_in_threadpool
 
-from app.core.face_engine import FaceEngine, NoFaceDetectedError
-from app.core.database import Database
+from app.core.face_engine import FaceEngine, ErrorSinRostroDetectado
+from app.core.database import DataBase
 from app.models.schemas import EnrollResponse, VerifyResponse, ValidateResponse
-from app.utils.image_proc import read_imagefile
+from app.utils.image_proc import leer_archivo_imagen
 
 # Basic logging
 logging.basicConfig(level=logging.INFO)
@@ -17,45 +17,45 @@ logger = logging.getLogger("biometric-service")
 
 app = FastAPI(title="Biometric Service - Face Recognition (CPU)")
 
-face_engine: FaceEngine = None
-db: Database = None
-THRESHOLD = float(os.getenv("VERIFICATION_THRESHOLD", "0.6"))
+motor_rostros: FaceEngine = None
+bd: DataBase = None
+UMBRAL = float(os.getenv("VERIFICATION_THRESHOLD", "0.6"))
 
 
 @app.on_event("startup")
-def startup_event():
-    global face_engine, db
+def evento_inicio():
+    global motor_rostros, bd
     # Initialize face engine (ONNX CPU)
-    face_engine = FaceEngine(model_name="buffalo_s")
+    motor_rostros = FaceEngine(nombre_modelo="buffalo_s")
 
     # Initialize database
-    database_url = os.getenv("DATABASE_URL", "postgresql://admin:password123@localhost:5432/urbanizacion_db")
-    db = Database(database_url)
-    db.init_db()
+    url_base_datos = os.getenv("DATABASE_URL", "postgresql://admin:password123@localhost:5432/urbanizacion_db")
+    bd = DataBase(url_base_datos)
+    bd.inicializar_bd()
 
 
 @app.post("/enroll", response_model=EnrollResponse)
-async def enroll_resident(user_id: str = Form(...), images: List[UploadFile] = File(...)):
+async def registrar_residente(user_id: str = Form(...), images: List[UploadFile] = File(...)):
     if len(images) != 3:
         raise HTTPException(status_code=400, detail="Exactly 3 images are required for enrollment")
 
     # Read and compute embeddings
     embeddings = []
-    for f in images:
+    for archivo in images:
         try:
-            img = await read_imagefile(f)
+            img = await leer_archivo_imagen(archivo)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
         try:
-            emb = await run_in_threadpool(face_engine.get_embedding, img)
+            emb = await run_in_threadpool(motor_rostros.obtener_incrustacion, img)
             embeddings.append(emb)
-        except NoFaceDetectedError as e:
+        except ErrorSinRostroDetectado as e:
             raise HTTPException(status_code=422, detail=str(e))
 
     # Average, normalize and store
-    mean_emb = await run_in_threadpool(face_engine.mean_embedding, embeddings)
+    inc_promedio = await run_in_threadpool(motor_rostros.incrustacion_promedio, embeddings)
     try:
-        await run_in_threadpool(db.upsert_resident, user_id, mean_emb.tolist())
+        await run_in_threadpool(bd.insertar_o_actualizar_residente, user_id, inc_promedio.tolist())
     except Exception as e:
         logger.exception("DB error during upsert_resident")
         raise HTTPException(status_code=500, detail="Database error during enrolment")
@@ -65,46 +65,46 @@ async def enroll_resident(user_id: str = Form(...), images: List[UploadFile] = F
 
 
 @app.post("/verify", response_model=VerifyResponse)
-async def verify_resident(user_id: str = Form(...), image: UploadFile = File(...)):
+async def verificar_residente(user_id: str = Form(...), image: UploadFile = File(...)):
     try:
-        img = await read_imagefile(image)
+        img = await leer_archivo_imagen(image)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     try:
-        emb = await run_in_threadpool(face_engine.get_embedding, img)
-    except NoFaceDetectedError as e:
+        emb = await run_in_threadpool(motor_rostros.obtener_incrustacion, img)
+    except ErrorSinRostroDetectado as e:
         raise HTTPException(status_code=422, detail=str(e))
 
     # Compare directly in DB using cosine distance
     try:
-        emb2 = await run_in_threadpool(db.get_resident_embedding, user_id)
+        inc2 = await run_in_threadpool(bd.obtener_incrustacion_residente, user_id)
     except Exception as e:
         logger.exception("DB error during get resident embedding")
         raise HTTPException(status_code=500, detail="Database error during verification")
     
     # compute cosine distance in Python
-    dist = face_engine.cosine_distance(emb, emb2)
-    match = dist <= THRESHOLD
-    logger.info(f"Validation match={match} distance={dist}")
-    return VerifyResponse(user_id=user_id, match=match, distance=float(dist))
+    distancia = motor_rostros.distancia_coseno(emb, inc2)
+    coincide = distancia <= UMBRAL
+    logger.info(f"Validation match={coincide} distance={distancia}")
+    return VerifyResponse(user_id=user_id, match=coincide, distance=float(distancia))
 
 
 @app.post("/validate", response_model=ValidateResponse)
-async def validate_visit(foto_cedula: UploadFile = File(...), foto_rostro_vivo: UploadFile = File(...)):
+async def validar_visita(foto_cedula: UploadFile = File(...), foto_rostro_vivo: UploadFile = File(...)):
     try:
-        img1 = await read_imagefile(foto_cedula)
-        img2 = await read_imagefile(foto_rostro_vivo)
+        img1 = await leer_archivo_imagen(foto_cedula)
+        img2 = await leer_archivo_imagen(foto_rostro_vivo)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
     try:
-        emb1 = await run_in_threadpool(face_engine.get_embedding, img1)
-        emb2 = await run_in_threadpool(face_engine.get_embedding, img2)
-    except NoFaceDetectedError as e:
+        inc1 = await run_in_threadpool(motor_rostros.obtener_incrustacion, img1)
+        inc2 = await run_in_threadpool(motor_rostros.obtener_incrustacion, img2)
+    except ErrorSinRostroDetectado as e:
         raise HTTPException(status_code=422, detail=str(e))
 
     # compute cosine distance in Python
-    dist = face_engine.cosine_distance(emb1, emb2)
-    match = dist <= THRESHOLD
-    logger.info(f"Validation match={match} distance={dist}")
-    return ValidateResponse(match=match, distance=float(dist))
+    distancia = motor_rostros.distancia_coseno(inc1, inc2)
+    coincide = distancia <= UMBRAL
+    logger.info(f"Validation match={coincide} distance={distancia}")
+    return ValidateResponse(match=coincide, distance=float(distancia))
