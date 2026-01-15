@@ -11,11 +11,11 @@ class ErrorSinRostroDetectado(Exception):
 
 class FaceEngine:
     def __init__(self, nombre_modelo: str = "buffalo_s"):
-        """Initialize FaceAnalysis using ONNX CPUExecutionProvider.
+        """Inicializar FaceAnalysis usando ONNX CPUExecutionProvider.
 
-        Note: Ensure that `onnxruntime` is installed and that `CPUExecutionProvider` is available.
+        Nota: Asegurar que `onnxruntime` esté instalado y que `CPUExecutionProvider` esté disponible.
         """
-        # Uso extension de CPU
+        # Usar proveedor de ejecución CPU
         try:
             self.app = FaceAnalysis(name=nombre_modelo, providers=["CPUExecutionProvider"])
             # ctx_id=-1 forces CPU
@@ -24,25 +24,25 @@ class FaceEngine:
             raise RuntimeError(f"Failed to initialize FaceAnalysis: {e}")
 
     def obtener_incrustacion(self, img: np.ndarray) -> np.ndarray:
-        """Return a normalized embedding for the largest detected face.
+        """Retornar una incrustación normalizada para el rostro más grande detectado.
 
-        Raises ErrorSinRostroDetectado if no face is found.
+        Lanza ErrorSinRostroDetectado si no se encuentra ningún rostro.
         """
         rostros = self.app.get(img)
         if not rostros:
             raise ErrorSinRostroDetectado("No face detected in the provided image")
 
-        # pick largest face (usually first) and get .embedding
+        # Seleccionar el rostro más grande (usualmente el primero) y obtener .embedding
         rostro = rostros[0]
         inc = np.asarray(rostro.embedding, dtype=np.float32)
-        # normalize
+        # Normalizar
         norma = np.linalg.norm(inc)
         if norma == 0:
             raise ErrorSinRostroDetectado("Invalid embedding (zero norm)")
         return inc / norma
 
     def incrustacion_promedio(self, incrustaciones: List[np.ndarray]) -> np.ndarray:
-        """Compute mean embedding and normalize it."""
+        """Calcular la incrustación promedio y normalizarla."""
         promedio = np.mean(np.stack(incrustaciones, axis=0), axis=0)
         norma = np.linalg.norm(promedio)
         if norma == 0:
@@ -50,7 +50,7 @@ class FaceEngine:
         return promedio / norma
 
     def distancia_coseno(self, a: np.ndarray, b: np.ndarray) -> float:
-        """Return cosine distance (1 - cosine_similarity)."""
+        """Retornar distancia coseno (1 - similitud_coseno)."""
         a = np.asarray(a, dtype=np.float32)
         b = np.asarray(b, dtype=np.float32)
         producto_punto = float(np.dot(a, b))
@@ -59,5 +59,5 @@ class FaceEngine:
         if norma_a == 0 or norma_b == 0:
             return 1.0
         similitud_coseno = producto_punto / (norma_a * norma_b)
-        # cosine distance
+        # Distancia coseno
         return 1.0 - similitud_coseno

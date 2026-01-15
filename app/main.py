@@ -10,7 +10,7 @@ from app.core.database import DataBase
 from app.models.schemas import EnrollResponse, VerifyResponse, ValidateResponse
 from app.utils.image_proc import leer_archivo_imagen
 
-# Basic logging
+# Configuración básica de logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("biometric-service")
 
@@ -25,10 +25,10 @@ UMBRAL = float(os.getenv("VERIFICATION_THRESHOLD", "0.6"))
 @app.on_event("startup")
 def evento_inicio():
     global motor_rostros, bd
-    # Initialize face engine (ONNX CPU)
+    # Inicializar motor de rostros (ONNX CPU)
     motor_rostros = FaceEngine(nombre_modelo="buffalo_s")
 
-    # Initialize database
+    # Inicializar base de datos
     url_base_datos = os.getenv("DATABASE_URL", "postgresql://admin:password123@localhost:5432/urbanizacion_db")
     bd = DataBase(url_base_datos)
     bd.inicializar_bd()
@@ -36,10 +36,10 @@ def evento_inicio():
 
 @app.post("/enroll", response_model=EnrollResponse)
 async def registrar_residente(user_id: str = Form(...), images: List[UploadFile] = File(...)):
-    if len(images) != 3:
-        raise HTTPException(status_code=400, detail="Exactly 3 images are required for enrollment")
+    if len(images) < 3:
+        raise HTTPException(status_code=400, detail="At least 3 images are required for enrollment")
 
-    # Read and compute embeddings
+    # Leer y calcular embeddings
     embeddings = []
     for archivo in images:
         try:
@@ -52,7 +52,7 @@ async def registrar_residente(user_id: str = Form(...), images: List[UploadFile]
         except ErrorSinRostroDetectado as e:
             raise HTTPException(status_code=422, detail=str(e))
 
-    # Average, normalize and store
+    # Promediar, normalizar y almacenar
     inc_promedio = await run_in_threadpool(motor_rostros.incrustacion_promedio, embeddings)
     try:
         await run_in_threadpool(bd.insertar_o_actualizar_residente, user_id, inc_promedio.tolist())
@@ -75,15 +75,14 @@ async def verificar_residente(user_id: str = Form(...), image: UploadFile = File
     except ErrorSinRostroDetectado as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    # Compare directly in DB using cosine distance
     try:
-        inc2 = await run_in_threadpool(bd.obtener_incrustacion_residente, user_id)
+        emb2 = await run_in_threadpool(bd.obtener_incrustacion_residente, user_id)
     except Exception as e:
         logger.exception("DB error during get resident embedding")
         raise HTTPException(status_code=500, detail="Database error during verification")
     
-    # compute cosine distance in Python
-    distancia = motor_rostros.distancia_coseno(emb, inc2)
+    # Calcular distancia coseno
+    distancia = motor_rostros.distancia_coseno(emb, emb2)
     coincide = distancia <= UMBRAL
     logger.info(f"Validation match={coincide} distance={distancia}")
     return VerifyResponse(user_id=user_id, match=coincide, distance=float(distancia))
@@ -98,13 +97,13 @@ async def validar_visita(foto_cedula: UploadFile = File(...), foto_rostro_vivo: 
         raise HTTPException(status_code=422, detail=str(e))
 
     try:
-        inc1 = await run_in_threadpool(motor_rostros.obtener_incrustacion, img1)
-        inc2 = await run_in_threadpool(motor_rostros.obtener_incrustacion, img2)
+        emb1 = await run_in_threadpool(motor_rostros.obtener_incrustacion, img1)
+        emb2 = await run_in_threadpool(motor_rostros.obtener_incrustacion, img2)
     except ErrorSinRostroDetectado as e:
         raise HTTPException(status_code=422, detail=str(e))
 
-    # compute cosine distance in Python
-    distancia = motor_rostros.distancia_coseno(inc1, inc2)
+    # Calcular distancia coseno
+    distancia = motor_rostros.distancia_coseno(emb1, emb2)
     coincide = distancia <= UMBRAL
     logger.info(f"Validation match={coincide} distance={distancia}")
     return ValidateResponse(match=coincide, distance=float(distancia))

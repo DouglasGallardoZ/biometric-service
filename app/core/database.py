@@ -13,7 +13,7 @@ class DataBase:
         self.motor = create_engine(self.url_base_datos, future=True)
         self.metadatos = MetaData()
 
-        # table: residentes(id unique, rostro_embedding rostro_embedding(512))
+        # Tabla: residentes(id unique, rostro_embedding vector(512))
         self.residentes = Table(
             "residentes",
             self.metadatos,
@@ -23,19 +23,19 @@ class DataBase:
         )
 
     def inicializar_bd(self):
-        # Create extension if not exists and create tables
+        # Crear extensión si no existe y crear tablas
         with self.motor.begin() as conexion:
             try:
-                # pgvector extension is named 'rostro_embedding'
+                # Extensión pgvector para vectores
                 conexion.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             except SQLAlchemyError:
-                # If the database user lacks privileges, still try to create tables.
+                # Si el usuario de BD carece de privilegios, aún así intentar crear tablas
                 pass
 
             self.metadatos.create_all(bind=conexion)
 
     def insertar_o_actualizar_residente(self, id: str, rostro_embedding: list):
-        # insert or update
+        # Insertar o actualizar
         with self.motor.begin() as conexion:
             sql = text(
                 "INSERT INTO residentes (id, rostro_embedding) VALUES (:id, :vec)"
@@ -49,21 +49,9 @@ class DataBase:
             resultado = conexion.execute(sql, {"id": id}).fetchone()
             if resultado is None:
                 return None
-            # SQLAlchemy returns a list/tuple containing a Python list for the rostro_embedding
+            # SQLAlchemy retorna una lista/tupla conteniendo una lista de Python para rostro_embedding
             vec = resultado[0]
             return vec
             # return np.asarray(vec, dtype=np.float32)
 
-    def verificar_usuario(self, id: str, rostro_embedding: list, umbral: float) -> Optional[Tuple[float, bool]]:
-        """Compare candidate rostro_embedding against stored rostro_embedding for user using cosine distance in DB.
-
-        This uses pgvector's cosine distance operator `<#>` which returns a float where 0 means identical.
-        """
-        with self.motor.connect() as conexion:
-            sql = text("SELECT (rostro_embedding <#> :vec) AS distance FROM residentes WHERE id = :id LIMIT 1")
-            resultado = conexion.execute(sql, {"vec": str(rostro_embedding), "id": id}).fetchone()
-            if resultado is None:
-                return None
-            distancia = float(resultado[0])
-            coincide = distancia <= umbral
-            return distancia, coincide
+    
