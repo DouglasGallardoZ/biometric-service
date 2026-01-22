@@ -1,8 +1,11 @@
 import os
 import logging
 from typing import List
+from datetime import datetime
+import aiofiles
+import os.path
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter,FastAPI, UploadFile, File, Form, HTTPException
 from starlette.concurrency import run_in_threadpool
 
 from app.core.face_engine import FaceEngine, ErrorSinRostroDetectado
@@ -15,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("biometric-service")
 
 
-app = FastAPI(title="Biometric Service - Face Recognition (CPU)")
+app = FastAPI(title="Biometric Service - Face Recognition (CPU)" , openapi_prefix="/api/v1")
 
 motor_rostros: FaceEngine = None
 bd: DataBase = None
@@ -35,37 +38,69 @@ def evento_inicio():
 
 
 @app.post("/enroll", response_model=EnrollResponse)
-async def registrar_residente(user_id: str = Form(...), images: List[UploadFile] = File(...)):
+async def registrar_residente(user_id: int = Form(...), usuario_creado: str = Form(...), images: List[UploadFile] = File(...)):
     if len(images) < 3:
         raise HTTPException(status_code=400, detail="At least 3 images are required for enrollment")
 
+    # Crear directorio para guardar imágenes si no existe
+    images_dir = os.path.join(os.path.dirname(__file__), "..", "uploads")
+    images_dir = os.path.abspath(images_dir)
+    os.makedirs(images_dir, exist_ok=True)
+
     # Leer y calcular embeddings
     embeddings = []
-    for archivo in images:
+    foto_info = []  # Guardar info de cada foto para registrar en BD
+    
+    for idx, archivo in enumerate(images):
         try:
-            img = await leer_archivo_imagen(archivo)
-        except ValueError as e:
-            raise HTTPException(status_code=422, detail=str(e))
-        try:
-            emb = await run_in_threadpool(motor_rostros.obtener_incrustacion, img)
+            # Leer contenido del archivo primero
+            contenido = await archivo.read()
+            # Guardar archivo de forma asíncrona
+            ext = os.path.splitext(archivo.filename)[1] or ".jpg"
+            nombre_archivo = f"persona_{user_id}_{idx}_{datetime.now().timestamp()}{ext}"
+            ruta_imagen = os.path.join(images_dir, nombre_archivo)
+            
+            async with aiofiles.open(ruta_imagen, 'wb') as f:
+                await f.write(contenido)
+            
+            # Procesar imagen desde el contenido guardado - obtener_incrustacion_desde_bytes ya retorna embedding
+            emb = await run_in_threadpool(motor_rostros.obtener_incrustacion_desde_bytes, contenido)
             embeddings.append(emb)
+            
+            foto_info.append({
+                "ruta": ruta_imagen,
+                "formato": ext.lstrip('.'),
+                "embedding": emb.tolist()
+            })
         except ErrorSinRostroDetectado as e:
             raise HTTPException(status_code=422, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
 
-    # Promediar, normalizar y almacenar
+    # Promediar, normalizar y almacenar embedding
     inc_promedio = await run_in_threadpool(motor_rostros.incrustacion_promedio, embeddings)
     try:
         await run_in_threadpool(bd.insertar_o_actualizar_residente, user_id, inc_promedio.tolist())
+        
+        # Registrar cada foto en persona_foto
+        for foto in foto_info:
+            await run_in_threadpool(
+                bd.insertar_foto_residente,
+                user_id,
+                foto["ruta"],
+                foto["formato"],
+                usuario_creado
+            )
     except Exception as e:
-        logger.exception("DB error during upsert_resident")
-        raise HTTPException(status_code=500, detail="Database error during enrolment")
+        logger.exception("DB error during enrollment")
+        raise HTTPException(status_code=500, detail="Error durante el registro en la base de datos")
 
-    logger.info(f"Enrolled user_id={user_id}")
-    return EnrollResponse(user_id=user_id, status="enrolled")
+    logger.info(f"Enrolled persona_titular_fk={user_id} with {len(images)} photos")
+    return EnrollResponse(user_id=str(user_id), status="enrolled")
 
 
 @app.post("/verify", response_model=VerifyResponse)
-async def verificar_residente(user_id: str = Form(...), image: UploadFile = File(...)):
+async def verificar_residente(user_id: int = Form(...), image: UploadFile = File(...)):
     try:
         img = await leer_archivo_imagen(image)
     except ValueError as e:
@@ -78,14 +113,14 @@ async def verificar_residente(user_id: str = Form(...), image: UploadFile = File
     try:
         emb2 = await run_in_threadpool(bd.obtener_incrustacion_residente, user_id)
     except Exception as e:
-        logger.exception("DB error during get resident embedding")
-        raise HTTPException(status_code=500, detail="Database error during verification")
+        logger.exception("Error al obtener el embedding del usuario")
+        raise HTTPException(status_code=500, detail="Error al obtener el embedding del usuario")
     
     # Calcular distancia coseno
     distancia = motor_rostros.distancia_coseno(emb, emb2)
     coincide = distancia <= UMBRAL
     logger.info(f"Validation match={coincide} distance={distancia}")
-    return VerifyResponse(user_id=user_id, match=coincide, distance=float(distancia))
+    return VerifyResponse(user_id=str(user_id), match=coincide, distance=float(distancia))
 
 
 @app.post("/validate", response_model=ValidateResponse)

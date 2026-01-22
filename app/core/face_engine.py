@@ -1,6 +1,8 @@
 from typing import List
+from io import BytesIO
 
 import numpy as np
+from PIL import Image
 
 from insightface.app import FaceAnalysis
 
@@ -40,6 +42,18 @@ class FaceEngine:
         if norma == 0:
             raise ErrorSinRostroDetectado("Invalid embedding (zero norm)")
         return inc / norma
+
+    def obtener_incrustacion_desde_bytes(self, contenido: bytes) -> np.ndarray:
+        """Convertir bytes de imagen a ndarray y retornar incrustación normalizada.
+        
+        Lanza ErrorSinRostroDetectado si no se encuentra ningún rostro.
+        """
+        try:
+            img = Image.open(BytesIO(contenido)).convert('RGB')
+            img_array = np.asarray(img)
+            return self.obtener_incrustacion(img_array)
+        except Exception as e:
+            raise ErrorSinRostroDetectado(f"Failed to process image: {str(e)}")
 
     def incrustacion_promedio(self, incrustaciones: List[np.ndarray]) -> np.ndarray:
         """Calcular la incrustación promedio y normalizarla."""
