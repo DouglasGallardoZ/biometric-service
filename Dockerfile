@@ -3,6 +3,11 @@ FROM ubuntu:24.04
 # Establecer variables de entorno
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
+ENV DB_USER=admin
+ENV DB_PASSWORD=NsNow276dQsLCMPbdEST2uUsKFeVjqTt
+ENV DB_HOST=dpg-d5p7se7pm1nc73bqcd80-a
+ENV DB_PORT=5432
+ENV DB_NAME=urbanizacion_db
 
 # Actualizar paquetes e instalar Python y dependencias
 RUN apt-get update && apt-get install -y \
@@ -17,6 +22,7 @@ WORKDIR /app
 
 # Copiar archivos del proyecto
 COPY . /app
+COPY .env.example /app/.env
 
 # Instalar dependencias de Python
 RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
