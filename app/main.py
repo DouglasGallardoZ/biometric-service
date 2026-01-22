@@ -31,8 +31,14 @@ def evento_inicio():
     # Inicializar motor de rostros (ONNX CPU)
     motor_rostros = FaceEngine(nombre_modelo="buffalo_s")
 
-    # Inicializar base de datos
-    url_base_datos = os.getenv("DATABASE_URL", "postgresql://admin:password123@localhost:5432/urbanizacion_db")
+    # Inicializar base de datos con variables de entorno
+    db_user = os.getenv("DB_USER", "admin")
+    db_password = os.getenv("DB_PASSWORD", "password123")
+    db_host = os.getenv("DB_HOST", "localhost")
+    db_port = os.getenv("DB_PORT", "5432")
+    db_name = os.getenv("DB_NAME", "urbanizacion_db")
+    
+    url_base_datos = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
     bd = DataBase(url_base_datos)
     bd.inicializar_bd()
 
