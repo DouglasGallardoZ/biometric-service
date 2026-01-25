@@ -1,150 +1,182 @@
-import os
+"""API principal - Capa de presentación."""
+
 import logging
 from typing import List
-from datetime import datetime
-import aiofiles
-import os.path
 
-from fastapi import APIRouter,FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from starlette.concurrency import run_in_threadpool
 
-from app.core.face_engine import FaceEngine, ErrorSinRostroDetectado
-from app.core.database import DataBase
+from app.infraestructura.configuracion import ConfiguradorAplicacion
 from app.models.schemas import EnrollResponse, VerifyResponse, ValidateResponse
-from app.utils.image_proc import leer_archivo_imagen
+from app.domain.models import ErrorSinRostroDetectado, ErrorVerificacion
+from app.domain.casos_uso import (
+    CasoDeUsoEnrollamiento, CasoDeUsoVerificacion, CasoDeUsoValidacionVisita
+)
 
 # Configuración básica de logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("biometric-service")
 
 
-app = FastAPI(title="Biometric Service - Face Recognition (CPU)" , openapi_prefix="/api/v1")
+app = FastAPI(
+    title="Biometric Service - Face Recognition (CPU)",
+    openapi_prefix="/api/v1"
+)
 
-motor_rostros: FaceEngine = None
-bd: DataBase = None
-UMBRAL = float(os.getenv("VERIFICATION_THRESHOLD", "0.6"))
+# Configuración de inyección de dependencias
+config = ConfiguradorAplicacion()
+
+# Casos de uso (inyectados)
+caso_enrollamiento: CasoDeUsoEnrollamiento = None
+caso_verificacion: CasoDeUsoVerificacion = None
+caso_validacion_visita: CasoDeUsoValidacionVisita = None
 
 
 @app.on_event("startup")
 def evento_inicio():
-    global motor_rostros, bd
-    # Inicializar motor de rostros (ONNX CPU)
-    motor_rostros = FaceEngine(nombre_modelo="buffalo_s")
-
-    # Inicializar base de datos con variables de entorno
-    db_user = os.getenv("DB_USER", "admin")
-    db_password = os.getenv("DB_PASSWORD", "password123")
-    db_host = os.getenv("DB_HOST", "localhost")
-    db_port = os.getenv("DB_PORT", "5432")
-    db_name = os.getenv("DB_NAME", "urbanizacion_db")
+    """Inicializar aplicación."""
+    global caso_enrollamiento, caso_verificacion, caso_validacion_visita
     
-    url_base_datos = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-    bd = DataBase(url_base_datos)
-    bd.inicializar_bd()
+    logger.info("Inicializando aplicación...")
+    try:
+        caso_enrollamiento = config.crear_caso_enrollamiento()
+        caso_verificacion = config.crear_caso_verificacion()
+        caso_validacion_visita = config.crear_caso_validacion_visita()
+        logger.info("Aplicación inicializada correctamente")
+    except Exception as e:
+        logger.error(f"Error inicializando aplicación: {e}")
+        raise
 
 
 @app.post("/enroll", response_model=EnrollResponse)
-async def registrar_residente(user_id: int = Form(...), usuario_creado: str = Form(...), images: List[UploadFile] = File(...)):
-    if len(images) < 3:
-        raise HTTPException(status_code=400, detail="At least 3 images are required for enrollment")
-
-    # Crear directorio para guardar imágenes si no existe
-    images_dir = os.path.join(os.path.dirname(__file__), "..", "uploads")
-    images_dir = os.path.abspath(images_dir)
-    os.makedirs(images_dir, exist_ok=True)
-
-    # Leer y calcular embeddings
-    embeddings = []
-    foto_info = []  # Guardar info de cada foto para registrar en BD
+async def registrar_residente(
+    user_id: int = Form(...),
+    usuario_creado: str = Form(...),
+    images: List[UploadFile] = File(...)
+):
+    """Registrar una persona con sus fotos faciales.
     
-    for idx, archivo in enumerate(images):
-        try:
-            # Leer contenido del archivo primero
-            contenido = await archivo.read()
-            # Guardar archivo de forma asíncrona
-            ext = os.path.splitext(archivo.filename)[1] or ".jpg"
-            nombre_archivo = f"persona_{user_id}_{idx}_{datetime.now().timestamp()}{ext}"
-            ruta_imagen = os.path.join(images_dir, nombre_archivo)
-            
-            async with aiofiles.open(ruta_imagen, 'wb') as f:
-                await f.write(contenido)
-            
-            # Procesar imagen desde el contenido guardado - obtener_incrustacion_desde_bytes ya retorna embedding
-            emb = await run_in_threadpool(motor_rostros.obtener_incrustacion_desde_bytes, contenido)
-            embeddings.append(emb)
-            
-            foto_info.append({
-                "ruta": ruta_imagen,
-                "formato": ext.lstrip('.'),
-                "embedding": emb.tolist()
-            })
-        except ErrorSinRostroDetectado as e:
-            raise HTTPException(status_code=422, detail=str(e))
-        except ValueError as e:
-            raise HTTPException(status_code=422, detail=str(e))
-
-    # Promediar, normalizar y almacenar embedding
-    inc_promedio = await run_in_threadpool(motor_rostros.incrustacion_promedio, embeddings)
+    - **user_id**: ID de la persona a registrar
+    - **usuario_creado**: Usuario que realiza el registro (auditoría)
+    - **images**: Mínimo 3 imágenes faciales
+    """
     try:
-        await run_in_threadpool(bd.insertar_o_actualizar_residente, user_id, inc_promedio.tolist())
+        if len(images) < 3:
+            raise ValueError("Se requieren al menos 3 imágenes para enrollar")
         
-        # Registrar cada foto en persona_foto
-        for foto in foto_info:
-            await run_in_threadpool(
-                bd.insertar_foto_residente,
-                user_id,
-                foto["ruta"],
-                foto["formato"],
-                usuario_creado
-            )
+        # Leer contenido de todas las imágenes
+        imagenes_bytes = []
+        for imagen in images:
+            contenido = await imagen.read()
+            imagenes_bytes.append(contenido)
+        
+        # Ejecutar caso de uso en threadpool
+        resultado = await run_in_threadpool(
+            caso_enrollamiento.ejecutar,
+            user_id,
+            usuario_creado,
+            imagenes_bytes
+        )
+        
+        logger.info(
+            f"Persona {user_id} enrollada correctamente con "
+            f"{resultado['fotos_guardadas']} fotos"
+        )
+        return EnrollResponse(user_id=str(user_id), status="enrolled")
+        
+    except ValueError as e:
+        logger.warning(f"Error en enrollamiento: {str(e)}")
+        raise HTTPException(status_code=422, detail=str(e))
+    except ErrorSinRostroDetectado as e:
+        logger.warning(f"No se detectó rostro: {str(e)}")
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        logger.exception("DB error during enrollment")
-        raise HTTPException(status_code=500, detail="Error durante el registro en la base de datos")
-
-    logger.info(f"Enrolled persona_titular_fk={user_id} with {len(images)} photos")
-    return EnrollResponse(user_id=str(user_id), status="enrolled")
+        logger.exception("Error en enrollamiento")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 
 @app.post("/verify", response_model=VerifyResponse)
-async def verificar_residente(user_id: int = Form(...), image: UploadFile = File(...)):
-    try:
-        img = await leer_archivo_imagen(image)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    try:
-        emb = await run_in_threadpool(motor_rostros.obtener_incrustacion, img)
-    except ErrorSinRostroDetectado as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-    try:
-        emb2 = await run_in_threadpool(bd.obtener_incrustacion_residente, user_id)
-    except Exception as e:
-        logger.exception("Error al obtener el embedding del usuario")
-        raise HTTPException(status_code=500, detail="Error al obtener el embedding del usuario")
+async def verificar_residente(
+    user_id: int = Form(...),
+    image: UploadFile = File(...)
+):
+    """Verificar identidad de una persona contra su registro.
     
-    # Calcular distancia coseno
-    distancia = motor_rostros.distancia_coseno(emb, emb2)
-    coincide = distancia <= UMBRAL
-    logger.info(f"Validation match={coincide} distance={distancia}")
-    return VerifyResponse(user_id=str(user_id), match=coincide, distance=float(distancia))
+    - **user_id**: ID de la persona a verificar
+    - **image**: Imagen facial para verificación
+    """
+    try:
+        # Leer imagen
+        contenido = await image.read()
+        
+        # Ejecutar caso de uso en threadpool
+        resultado = await run_in_threadpool(
+            caso_verificacion.ejecutar,
+            user_id,
+            contenido
+        )
+        
+        logger.info(
+            f"Verificación de persona {user_id}: "
+            f"coincide={resultado.coincide}, distancia={resultado.distancia:.4f}"
+        )
+        return VerifyResponse(
+            user_id=str(user_id),
+            match=resultado.coincide,
+            distance=float(resultado.distancia)
+        )
+        
+    except ErrorSinRostroDetectado as e:
+        logger.warning(f"No se detectó rostro en imagen de verificación: {str(e)}")
+        raise HTTPException(status_code=422, detail=str(e))
+    except ErrorVerificacion as e:
+        logger.warning(f"Error en verificación: {str(e)}")
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.exception("Error en verificación")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 
 @app.post("/validate", response_model=ValidateResponse)
-async def validar_visita(foto_cedula: UploadFile = File(...), foto_rostro_vivo: UploadFile = File(...)):
+async def validar_visita(
+    foto_cedula: UploadFile = File(...),
+    foto_rostro_vivo: UploadFile = File(...)
+):
+    """Validar que el rostro vivo coincide con la foto de cédula.
+    
+    - **foto_cedula**: Foto del documento de identidad
+    - **foto_rostro_vivo**: Foto del rostro en vivo
+    """
     try:
-        img1 = await leer_archivo_imagen(foto_cedula)
-        img2 = await leer_archivo_imagen(foto_rostro_vivo)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-    try:
-        emb1 = await run_in_threadpool(motor_rostros.obtener_incrustacion, img1)
-        emb2 = await run_in_threadpool(motor_rostros.obtener_incrustacion, img2)
+        # Leer imágenes
+        contenido_cedula = await foto_cedula.read()
+        contenido_vivo = await foto_rostro_vivo.read()
+        
+        # Ejecutar caso de uso en threadpool
+        resultado = await run_in_threadpool(
+            caso_validacion_visita.ejecutar,
+            contenido_cedula,
+            contenido_vivo
+        )
+        
+        logger.info(
+            f"Validación de visita: "
+            f"coincide={resultado.coincide}, distancia={resultado.distancia:.4f}"
+        )
+        return ValidateResponse(
+            match=resultado.coincide,
+            distance=float(resultado.distancia)
+        )
+        
     except ErrorSinRostroDetectado as e:
+        logger.warning(f"No se detectó rostro en validación: {str(e)}")
         raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.exception("Error en validación")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
-    # Calcular distancia coseno
-    distancia = motor_rostros.distancia_coseno(emb1, emb2)
-    coincide = distancia <= UMBRAL
-    logger.info(f"Validation match={coincide} distance={distancia}")
-    return ValidateResponse(match=coincide, distance=float(distancia))
+
+@app.get("/health")
+async def health_check():
+    """Verificar estado de la aplicación."""
+    return {"status": "healthy"}
