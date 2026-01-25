@@ -2,12 +2,12 @@ from pydantic import BaseModel
 
 
 class EnrollResponse(BaseModel):
-    user_id: str
+    persona_id: int
     status: str
 
 
 class VerifyResponse(BaseModel):
-    user_id: str
+    persona_id: int
     match: bool
     distance: float
 
