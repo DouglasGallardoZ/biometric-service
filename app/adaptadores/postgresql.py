@@ -94,7 +94,6 @@ class AdaptadorPostgresFotos(PuertoAlmacenamientoFotos):
             Column("usuario_creado", String(20), nullable=False),
             Column("fecha_actualizado", DateTime, nullable=True),
             Column("usuario_actualizado", String(20), nullable=True),
-            Column("rostro_embedding", Vector(512), nullable=True),
         )
         
         self._inicializar_bd()
@@ -109,15 +108,14 @@ class AdaptadorPostgresFotos(PuertoAlmacenamientoFotos):
         with self.motor.begin() as conexion:
             sql = text(
                 "INSERT INTO persona_foto "
-                "(persona_titular_fk, ruta_imagen, formato, rostro_embedding, usuario_creado, eliminado) "
-                "VALUES (:persona_fk, :ruta, :fmt, :vec, :usuario, :eliminado) "
+                "(persona_titular_fk, ruta_imagen, formato, usuario_creado, eliminado) "
+                "VALUES (:persona_fk, :ruta, :fmt, :usuario, :eliminado) "
                 "RETURNING foto_pk"
             )
             resultado = conexion.execute(sql, {
                 "persona_fk": foto.persona_titular_fk,
                 "ruta": foto.ruta_imagen,
                 "fmt": foto.formato,
-                "vec": foto.embedding.to_list(),
                 "usuario": foto.usuario_creado,
                 "eliminado": foto.eliminado
             }).fetchone()
@@ -129,7 +127,7 @@ class AdaptadorPostgresFotos(PuertoAlmacenamientoFotos):
             sql = text(
                 "SELECT foto_pk, persona_titular_fk, ruta_imagen, formato, "
                 "eliminado, motivo_eliminado, fecha_creado, usuario_creado, "
-                "fecha_actualizado, usuario_actualizado, rostro_embedding "
+                "fecha_actualizado, usuario_actualizado "
                 "FROM persona_foto WHERE foto_pk = :foto_pk"
             )
             resultado = conexion.execute(sql, {"foto_pk": foto_pk}).fetchone()
@@ -138,7 +136,7 @@ class AdaptadorPostgresFotos(PuertoAlmacenamientoFotos):
                 return None
             
             (foto_pk, persona_fk, ruta, fmt, eliminado, motivo, fecha_creado,
-             usuario_creado, fecha_act, usuario_act, vec) = resultado
+             usuario_creado, fecha_act, usuario_act) = resultado
             
             return PersonaFoto(
                 foto_pk=foto_pk,
@@ -151,7 +149,7 @@ class AdaptadorPostgresFotos(PuertoAlmacenamientoFotos):
                 usuario_creado=usuario_creado,
                 fecha_actualizado=fecha_act,
                 usuario_actualizado=usuario_act,
-                embedding=Embedding(vector=np.array(vec, dtype=np.float32))
+                embedding=None
             )
     
     def obtener_fotos_persona(self, persona_titular_fk: int) -> list[PersonaFoto]:
@@ -160,7 +158,7 @@ class AdaptadorPostgresFotos(PuertoAlmacenamientoFotos):
             sql = text(
                 "SELECT foto_pk, persona_titular_fk, ruta_imagen, formato, "
                 "eliminado, motivo_eliminado, fecha_creado, usuario_creado, "
-                "fecha_actualizado, usuario_actualizado, rostro_embedding "
+                "fecha_actualizado, usuario_actualizado "
                 "FROM persona_foto WHERE persona_titular_fk = :persona_fk AND eliminado = false "
                 "ORDER BY fecha_creado DESC"
             )
@@ -168,7 +166,7 @@ class AdaptadorPostgresFotos(PuertoAlmacenamientoFotos):
             
             fotos = []
             for (foto_pk, persona_fk, ruta, fmt, eliminado, motivo, fecha_creado,
-                 usuario_creado, fecha_act, usuario_act, vec) in resultados:
+                 usuario_creado, fecha_act, usuario_act) in resultados:
                 foto = PersonaFoto(
                     foto_pk=foto_pk,
                     persona_titular_fk=persona_fk,
@@ -180,7 +178,7 @@ class AdaptadorPostgresFotos(PuertoAlmacenamientoFotos):
                     usuario_creado=usuario_creado,
                     fecha_actualizado=fecha_act,
                     usuario_actualizado=usuario_act,
-                    embedding=Embedding(vector=np.array(vec, dtype=np.float32))
+                    embedding=None
                 )
                 fotos.append(foto)
             
