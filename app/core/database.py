@@ -5,7 +5,6 @@ from datetime import datetime
 import numpy as np
 from sqlalchemy import (Column, Integer, MetaData, String, Table, create_engine, text, Boolean, DateTime, Text)
 from sqlalchemy.exc import SQLAlchemyError
-from pgvector.sqlalchemy import Vector
 
 
 class DataBase:
@@ -20,7 +19,7 @@ class DataBase:
             self.metadatos,
             Column("embedding_pk", Integer, primary_key=True, autoincrement=True),
             Column("persona_titular_fk", Integer, nullable=False),
-            Column("rostro_embedding", Vector(512), nullable=True),
+            Column("rostro_embedding", Text, nullable=False),
         )
 
         # Tabla: persona_foto(foto_pk, persona_titular_fk, ruta_imagen, formato, eliminado, etc)
@@ -40,14 +39,9 @@ class DataBase:
         )
 
     def inicializar_bd(self):
-        # Crear extensión si no existe y crear tablas
+        # Crear tablas si no existen
         with self.motor.begin() as conexion:
-            try:
-                # Extensión pgvector para vectores
-                conexion.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            except SQLAlchemyError:
-                # Si el usuario de BD carece de privilegios, aún así intentar crear tablas
-                pass
+            self.metadatos.create_all(bind=conexion)
 
             self.metadatos.create_all(bind=conexion)
 

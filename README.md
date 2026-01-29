@@ -12,7 +12,7 @@ Microservicio profesional en FastAPI que implementa **enrolamiento** y **verific
 - Registra personas con **3+ imágenes** faciales
 - Calcula y almacena embedding **individual por foto**
 - Calcula y almacena embedding **promedio normalizado**
-- Almacena en PostgreSQL con pgvector
+- Almacena en PostgreSQL
 
 ### 🔶 Verificación  
 - Verifica identidad **1:1** contra registro

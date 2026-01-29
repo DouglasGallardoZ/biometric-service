@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   db:
-    image: ankane/pgvector:latest  # Imagen oficial con pgvector preinstalado
+    image: postgres:14-alpine  # PostgreSQL 14 en Alpine Linux
     container_name: biometric_db
     restart: always
     environment:

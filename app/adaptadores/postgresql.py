@@ -4,7 +4,6 @@ from typing import Optional
 import numpy as np
 from sqlalchemy import create_engine, text, MetaData, Table, Column, Integer, String, Boolean, DateTime, Text
 from sqlalchemy.exc import SQLAlchemyError
-from pgvector.sqlalchemy import Vector
 
 from app.domain.models import Embedding, PersonaFoto, PersonaEmbedding
 from app.domain.puertos import PuertoAlmacenamientoFotos, PuertoAlmacenamientoEmbeddings
@@ -24,30 +23,27 @@ class AdaptadorPostgresEmbeddings(PuertoAlmacenamientoEmbeddings):
             self.metadatos,
             Column("embedding_pk", Integer, primary_key=True, autoincrement=True),
             Column("persona_titular_fk", Integer, nullable=False),
-            Column("rostro_embedding", Vector(512), nullable=True),
+            Column("rostro_embedding", Text, nullable=False),
         )
         
         self._inicializar_bd()
     
     def _inicializar_bd(self):
-        """Crear tablas y extensiones si no existen."""
+        """Crear tablas si no existen."""
         with self.motor.begin() as conexion:
-            try:
-                conexion.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            except SQLAlchemyError:
-                pass
             self.metadatos.create_all(bind=conexion)
     
     def guardar_embedding(self, persona_embedding: PersonaEmbedding) -> int:
         """Guardar embedding promedio y retornar el ID."""
         with self.motor.begin() as conexion:
+            embedding_str = ','.join(str(x) for x in persona_embedding.embedding.vector)
             sql = text(
                 "INSERT INTO persona_embedding (persona_titular_fk, rostro_embedding) "
-                "VALUES (:persona_fk, :vec) RETURNING embedding_pk"
+                "VALUES (:persona_fk, :embedding_str) RETURNING embedding_pk"
             )
             resultado = conexion.execute(sql, {
                 "persona_fk": persona_embedding.persona_titular_fk,
-                "vec": persona_embedding.embedding.to_list()
+                "embedding_str": embedding_str
             }).fetchone()
             return resultado[0] if resultado else None
     
@@ -64,11 +60,12 @@ class AdaptadorPostgresEmbeddings(PuertoAlmacenamientoEmbeddings):
             if not resultado:
                 return None
             
-            embedding_pk, persona_fk, vec = resultado
+            embedding_pk, persona_fk, embedding_str = resultado
+            vec = np.array([float(x) for x in embedding_str.split(',')], dtype=np.float32)
             return PersonaEmbedding(
                 embedding_pk=embedding_pk,
                 persona_titular_fk=persona_fk,
-                embedding=Embedding(vector=np.array(vec, dtype=np.float32))
+                embedding=Embedding(vector=vec)
             )
 
 
