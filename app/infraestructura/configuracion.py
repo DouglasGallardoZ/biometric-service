@@ -8,6 +8,8 @@ from app.domain.puertos import (
 from app.adaptadores.analizador_rostros import AdaptadorInsightFaceAnalyzer
 from app.adaptadores.postgresql import AdaptadorPostgresEmbeddings, AdaptadorPostgresFotos
 from app.adaptadores.sistema_archivos import AdaptadorSistemaArchivosLocal
+from app.adaptadores.s3 import AdaptadorS3
+from app.adaptadores.gcs import AdaptadorGoogleCloudStorage
 from app.domain.casos_uso import (
     CasoDeUsoEnrollamiento, CasoDeUsoVerificacion, CasoDeUsoValidacionVisita
 )
@@ -29,6 +31,9 @@ class ConfiguradorAplicacion:
         # Verificación
         self.umbral_verificacion = float(os.getenv("VERIFICATION_THRESHOLD", "0.6"))
         
+        # Storage
+        self.storage_type = os.getenv("STORAGE_TYPE", "local")  # local, s3, gcs
+        
         # Archivos
         self.directorio_uploads = os.getenv("UPLOADS_DIR", "uploads")
     
@@ -45,8 +50,26 @@ class ConfiguradorAplicacion:
         return AdaptadorPostgresFotos(self.db_url)
     
     def crear_sistema_archivos(self) -> PuertoSistemaArchivos:
-        """Crear adaptador de sistema de archivos."""
-        return AdaptadorSistemaArchivosLocal(self.directorio_uploads)
+        """Crear adaptador de sistema de archivos según configuración.
+        
+        Tipos soportados:
+        - local: Almacenamiento local
+        - s3: AWS S3
+        - gcs: Google Cloud Storage
+        """
+        if self.storage_type == "s3":
+            return AdaptadorS3(
+                bucket_name=os.getenv("S3_BUCKET_NAME"),
+                region=os.getenv("AWS_REGION", "us-east-1")
+            )
+        elif self.storage_type == "gcs":
+            return AdaptadorGoogleCloudStorage(
+                bucket_name=os.getenv("GCS_BUCKET_NAME"),
+                credenciales_path=os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+            )
+        else:
+            # Default: almacenamiento local
+            return AdaptadorSistemaArchivosLocal(self.directorio_uploads)
     
     def crear_caso_enrollamiento(self) -> CasoDeUsoEnrollamiento:
         """Crear caso de uso de enrollamiento."""
