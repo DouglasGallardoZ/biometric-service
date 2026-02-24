@@ -4,10 +4,13 @@ FROM ubuntu:24.04
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV DB_USER=admin
-ENV DB_PASSWORD=NsNow276dQsLCMPbdEST2uUsKFeVjqTt
-ENV DB_HOST=dpg-d5p7se7pm1nc73bqcd80-a
+ENV DB_PASSWORD=password123
+ENV DB_HOST=biometric_db
 ENV DB_PORT=5432
 ENV DB_NAME=urbanizacion_db
+ENV STORAGE_TYPE=gcs
+ENV GCS_BUCKET_NAME=biometric-fotos
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/applied-pipe-308521-724bd62924dd.json
 
 # Actualizar paquetes e instalar Python y dependencias
 RUN apt-get update && apt-get install -y \

@@ -15,3 +15,4 @@ build/
 coverage/
 uploads/
 applied-pipe-308521-724bd62924dd.json
+.python-version
