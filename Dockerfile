@@ -1,34 +1,33 @@
-FROM ubuntu:24.04
+FROM python:3.12-slim
 
 # Establecer variables de entorno
 ENV PYTHONUNBUFFERED=1
-ENV DEBIAN_FRONTEND=noninteractive
 ENV DB_USER=admin
 ENV DB_PASSWORD=password123
 ENV DB_HOST=biometric_db
 ENV DB_PORT=5432
 ENV DB_NAME=urbanizacion_db
-ENV STORAGE_TYPE=gcs
-ENV GCS_BUCKET_NAME=biometric-fotos
-ENV GOOGLE_APPLICATION_CREDENTIALS=/app/applied-pipe-308521-724bd62924dd.json
+ENV STORAGE_TYPE=local
 
-# Actualizar paquetes e instalar Python y dependencias
+# Instalar dependencias del sistema necesarias para compilar C/C++ (para insightface)
 RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    python3-venv \
+    build-essential \
+    python3-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Establecer directorio de trabajo
 WORKDIR /app
 
-# Copiar archivos del proyecto
-COPY . /app
-COPY .env.example /app/.env
+# Copiar solo requirements.txt para aprovechar el caché de Docker
+COPY requirements.txt /app/
 
 # Instalar dependencias de Python
-RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copiar el resto del proyecto
+COPY . /app
+COPY .env.example /app/.env
 
 # Exponer el puerto
 EXPOSE 8000
