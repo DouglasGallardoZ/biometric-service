@@ -1,0 +1,37 @@
+# Control de versiones
+.git
+.gitignore
+
+# Entornos virtuales
+.venv
+venv/
+env/
+env.bak/
+
+# Archivos de entorno (no empaquetar credenciales)
+.env
+.env.*
+!.env.example
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Archivos de configuración locales
+.idea/
+.vscode/
+.DS_Store
+
+# Datos y logs
+uploads/
+*.log
+*.sqlite3
+coverage/
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore

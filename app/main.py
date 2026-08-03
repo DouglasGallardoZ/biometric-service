@@ -3,6 +3,10 @@
 import logging
 from typing import List
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from starlette.concurrency import run_in_threadpool
 
