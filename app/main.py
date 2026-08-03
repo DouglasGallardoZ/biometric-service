@@ -51,7 +51,6 @@ def evento_inicio():
 @app.post("/enroll", response_model=EnrollResponse)
 async def registrar_residente(
     persona_id: int = Form(...),
-    usuario_creado: str = Form(...),
     images: List[UploadFile] = File(...)
 ):
     """Registrar una persona con sus fotos faciales.
@@ -61,6 +60,8 @@ async def registrar_residente(
     - **images**: Mínimo 3 imágenes faciales
     """
     try:
+        usuario_creado = "user_system"
+
         if len(images) < 3:
             raise ValueError("Se requieren al menos 3 imágenes para enrollar")
         
